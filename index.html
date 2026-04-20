@@ -191,9 +191,9 @@ function createPrism() {
   const group = new THREE.Group();
 
   const shape = new THREE.Shape();
-  shape.moveTo(-1.5, -0.75);
-  shape.lineTo(1.5, -0.75);
-  shape.lineTo(0, 0.75);
+  shape.moveTo(-1.5, 0.75);
+  shape.lineTo(1.5, 0.75);
+  shape.lineTo(0, -0.75);
   shape.closePath();
 
   const extrudeSettings = { depth: 1.2, bevelEnabled: false };
