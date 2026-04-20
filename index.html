@@ -48,7 +48,9 @@
   </div>
   <div class="section" style="margin-top:4px;">
     <span style="color:#44ff44;">绿色 — 入射光/成像光</span><br>
-    <span style="color:#ff4444;">红色虚线 — 反射光</span>
+    <span style="color:#ff4444;">红色虚线 — 反射光</span><br>
+    <span style="color:#ffaa00;">橙色箭头 — CMOS1 法向量 n₁</span><br>
+    <span style="color:#ff66ff;">紫色箭头 — CMOS2 法向量 n₂</span>
   </div>
 </div>
 <div id="mode-indicator">就绪</div>
@@ -61,6 +63,7 @@
     <tr><td>像元尺寸</td><td>4.4 μm</td><td>4.4 μm</td></tr>
     <tr><td>中心点偏移</td><td>(63.63, 42.39) mm</td><td>(63.63, -42.39) mm</td></tr>
     <tr><td>反射镜法向量</td><td>[-0.225, 0.233, -0.946]</td><td>[-0.225, -0.233, -0.946]</td></tr>
+    <tr><td>视场角 (FOV)</td><td colspan="2">2.17° (2×atan(4096×4.4μm/2÷475mm))</td></tr>
   </table>
 </div>
 
@@ -447,6 +450,38 @@ function createFOVLines(cmosX) {
 }
 createFOVLines(-1.5);
 createFOVLines(1.5);
+
+// FOV 角度标注
+const fovLabel1 = createLabel('FOV = 2.17°', '#aaaaaa', 0.6);
+fovLabel1.position.set(-1.8, -2.3, 0.5);
+scene.add(fovLabel1);
+
+const fovLabel2 = createLabel('FOV = 2.17°', '#aaaaaa', 0.6);
+fovLabel2.position.set(1.8, -2.3, -0.5);
+scene.add(fovLabel2);
+
+// ==================== 反射镜法向量 ====================
+const normalLength = 1.5;
+const normalColor1 = 0xffaa00;
+const normalColor2 = 0xff66ff;
+
+// CMOS1 反射镜法向量: [-0.22534469, 0.23344536, -0.945898]
+const n1 = new THREE.Vector3(-0.22534469, 0.23344536, -0.945898).normalize();
+const n1Origin = new THREE.Vector3(-0.3, 4.15, 0);
+const n1Arrow = new THREE.ArrowHelper(n1, n1Origin, normalLength, normalColor1, 0.18, 0.09);
+scene.add(n1Arrow);
+const n1Label = createLabel('n\u2081', '#ffaa00', 0.6);
+n1Label.position.copy(n1Origin).add(n1.clone().multiplyScalar(normalLength + 0.4));
+scene.add(n1Label);
+
+// CMOS2 反射镜法向量: [-0.22534469, -0.23344536, -0.945898]
+const n2 = new THREE.Vector3(-0.22534469, -0.23344536, -0.945898).normalize();
+const n2Origin = new THREE.Vector3(0.3, 4.15, 0);
+const n2Arrow = new THREE.ArrowHelper(n2, n2Origin, normalLength, normalColor2, 0.18, 0.09);
+scene.add(n2Arrow);
+const n2Label = createLabel('n\u2082', '#ff66ff', 0.6);
+n2Label.position.copy(n2Origin).add(n2.clone().multiplyScalar(normalLength + 0.4));
+scene.add(n2Label);
 
 // ==================== 文字标签 ====================
 const prismLabel = createLabel('双面共体棱镜', '#7ec8e3', 1.2);
