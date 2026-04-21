@@ -229,8 +229,8 @@ function createPrismFromNormals(n1t, n2t, prismSize, prismDepth) {
   // 反射面方向（垂直于法线，指向棱镜内部 = 下方）
   const s1 = new THREE.Vector2(n1p.y, -n1p.x).normalize();
   const s2 = new THREE.Vector2(-n2p.y, n2p.x).normalize();
-  if (s1.y > 0) s1.negate();
-  if (s2.y > 0) s2.negate();
+  if (s1.y < 0) s1.negate();
+  if (s2.y < 0) s2.negate();
 
   // 截面顶点（以棱线为原点）
   function csTo3D(cs) {
