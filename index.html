@@ -48,7 +48,7 @@
     <span style="color:#888;">右手系</span>
   </div>
   <div class="section" style="margin-top:4px;">
-    <span style="color:#44ff44;">绿色 — 入射光/成像光</span><br>
+    <span style="color:#44ff44;">绿色 — 入射光</span><br>
     <span style="color:#ff4444;">红色虚线 — 反射光</span><br>
     <span style="color:#ffaa00;">橙色 — CMOS1 反射镜法向量 n₁</span><br>
     <span style="color:#ff66ff;">紫色 — CMOS2 反射镜法向量 n₂</span>
@@ -117,8 +117,6 @@ scene.add(gridHelper);
 // ==================== 世界坐标系（用户约定） ====================
 function createAxes(length, lineWidth) {
   const group = new THREE.Group();
-  // 用户坐标系 → Three.js方向
-  // X向前 = Three.js +Z, Y向左 = Three.js -X, Z向下 = Three.js -Y
   const axesData = [
     { dir: new THREE.Vector3(0, 0, 1),  color: 0xff4444, label: 'X' },
     { dir: new THREE.Vector3(-1, 0, 0), color: 0x44ff44, label: 'Y' },
@@ -140,18 +138,15 @@ function createAxes(length, lineWidth) {
     const coneMat = new THREE.MeshBasicMaterial({ color });
     const cone = new THREE.Mesh(coneGeo, coneMat);
     cone.position.copy(dir.clone().multiplyScalar(length));
-    const defaultDir = new THREE.Vector3(0, 1, 0);
-    cone.quaternion.setFromUnitVectors(defaultDir, dir.clone().normalize());
+    cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
     group.add(cone);
 
     const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
+    canvas.width = 64; canvas.height = 64;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
     ctx.font = 'bold 48px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(label, 32, 32);
     const texture = new THREE.CanvasTexture(canvas);
     const spriteMat = new THREE.SpriteMaterial({ map: texture, depthTest: false });
@@ -160,7 +155,6 @@ function createAxes(length, lineWidth) {
     sprite.scale.set(0.4, 0.4, 0.4);
     group.add(sprite);
   }
-
   return group;
 }
 
@@ -173,16 +167,12 @@ function createLabel(text, color, scale) {
   const canvasW = isLong ? 512 : 256;
   const canvasH = isLong ? 192 : 128;
   const fontSize = isLong ? 36 : 48;
-
   const canvas = document.createElement('canvas');
-  canvas.width = canvasW;
-  canvas.height = canvasH;
+  canvas.width = canvasW; canvas.height = canvasH;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = color || '#ffffff';
   ctx.font = `bold ${fontSize}px Arial`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   if (isLong && text.length > 10) {
     const mid = Math.ceil(text.length / 2);
     ctx.fillText(text.slice(0, mid), canvasW / 2, canvasH / 2 - fontSize * 0.6);
@@ -190,7 +180,6 @@ function createLabel(text, color, scale) {
   } else {
     ctx.fillText(text, canvasW / 2, canvasH / 2);
   }
-
   const texture = new THREE.CanvasTexture(canvas);
   const spriteMat = new THREE.SpriteMaterial({ map: texture, depthTest: false });
   const sprite = new THREE.Sprite(spriteMat);
@@ -199,19 +188,83 @@ function createLabel(text, color, scale) {
   return sprite;
 }
 
-// ==================== 双面共体棱镜 ====================
-function createPrism() {
+// ==================== 精确几何参数 ====================
+// 1 scene unit = 100mm
+const focalLengthScene = 4.75;
+const cmos1OffsetUser = { x: 63.63 / 100, y: 42.39 / 100 };
+const cmos2OffsetUser = { x: 63.63 / 100, y: -42.39 / 100 };
+
+const imagingCenterThree = new THREE.Vector3(0, 0, 0);
+const prismCenterThree = new THREE.Vector3(0, 3.5, 0);
+
+const cmos1Three = userToThree(cmos1OffsetUser.x, cmos1OffsetUser.y, focalLengthScene);
+const cmos2Three = userToThree(cmos2OffsetUser.x, cmos2OffsetUser.y, focalLengthScene);
+
+// 法线 (用户坐标, 已归一化)
+const n1UserVec = new THREE.Vector3(-0.22534469, 0.23344536, -0.945898).normalize();
+const n2UserVec = new THREE.Vector3(-0.22534469, -0.23344536, -0.945898).normalize();
+
+// 转换到 Three.js
+const n1Three = userToThree(n1UserVec.x, n1UserVec.y, n1UserVec.z).normalize();
+const n2Three = userToThree(n2UserVec.x, n2UserVec.y, n2UserVec.z).normalize();
+
+// ==================== 棱镜（反射面垂直于法线） ====================
+function createPrismFromNormals(n1t, n2t, prismSize, prismDepth) {
   const group = new THREE.Group();
 
-  const shape = new THREE.Shape();
-  shape.moveTo(-1.5, 0.75);
-  shape.lineTo(1.5, 0.75);
-  shape.lineTo(0, -0.75);
-  shape.closePath();
+  // 棱线方向 = n1 × n2
+  const ridge = new THREE.Vector3().crossVectors(n1t, n2t).normalize();
 
-  const extrudeSettings = { depth: 1.2, bevelEnabled: false };
-  const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-  geo.center();
+  // 截面基向量
+  let e1 = new THREE.Vector3(1, 0, 0);
+  if (Math.abs(ridge.dot(e1)) > 0.9) e1.set(0, 0, 1);
+  const e2temp = new THREE.Vector3().crossVectors(ridge, e1).normalize();
+  e1.crossVectors(e2temp, ridge).normalize();
+  const e2 = e2temp;
+
+  // 法线投影到截面
+  const n1p = new THREE.Vector2(n1t.dot(e1), n1t.dot(e2));
+  const n2p = new THREE.Vector2(n2t.dot(e1), n2t.dot(e2));
+
+  // 反射面方向（垂直于法线，指向棱镜内部 = 下方）
+  const s1 = new THREE.Vector2(n1p.y, -n1p.x).normalize();
+  const s2 = new THREE.Vector2(-n2p.y, n2p.x).normalize();
+  if (s1.y > 0) s1.negate();
+  if (s2.y > 0) s2.negate();
+
+  // 截面顶点（以棱线为原点）
+  function csTo3D(cs) {
+    return new THREE.Vector3().addScaledVector(e1, cs.x).addScaledVector(e2, cs.y);
+  }
+  const v0f = csTo3D(new THREE.Vector2(0, 0));
+  const v1f = csTo3D(s1.clone().multiplyScalar(prismSize));
+  const v2f = csTo3D(s2.clone().multiplyScalar(prismSize));
+
+  const ridgeOffset = ridge.clone().multiplyScalar(prismDepth);
+  const v0b = v0f.clone().add(ridgeOffset);
+  const v1b = v1f.clone().add(ridgeOffset);
+  const v2b = v2f.clone().add(ridgeOffset);
+
+  // 中心化
+  const center = new THREE.Vector3();
+  [v0f, v1f, v2f, v0b, v1b, v2b].forEach(v => center.add(v));
+  center.divideScalar(6);
+  [v0f, v1f, v2f, v0b, v1b, v2b].forEach(v => v.sub(center));
+
+  const verts = new Float32Array([
+    ...v0f.toArray(), ...v2f.toArray(), ...v1f.toArray(),
+    ...v0b.toArray(), ...v1b.toArray(), ...v2b.toArray(),
+    ...v0f.toArray(), ...v1f.toArray(), ...v1b.toArray(),
+    ...v0f.toArray(), ...v1b.toArray(), ...v0b.toArray(),
+    ...v0f.toArray(), ...v0b.toArray(), ...v2b.toArray(),
+    ...v0f.toArray(), ...v2b.toArray(), ...v2f.toArray(),
+    ...v1f.toArray(), ...v2f.toArray(), ...v2b.toArray(),
+    ...v1f.toArray(), ...v2b.toArray(), ...v1b.toArray(),
+  ]);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+  geo.computeVertexNormals();
 
   const mat = new THREE.MeshPhongMaterial({
     color: 0x4488cc, transparent: true, opacity: 0.5,
@@ -220,69 +273,83 @@ function createPrism() {
   group.add(new THREE.Mesh(geo, mat));
 
   const edges = new THREE.EdgesGeometry(geo);
-  const lineMat = new THREE.LineBasicMaterial({ color: 0x88aadd });
-  group.add(new THREE.LineSegments(edges, lineMat));
+  group.add(new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x88aadd })));
 
+  // 返回截面信息用于定位镜面
+  group.userData = { v0f, v1f, v2f, v0b, v1b, v2b, center, e1, e2, ridge };
   return group;
 }
+
+const prism = createPrismFromNormals(n1Three, n2Three, 1.5, 1.5);
+prism.position.copy(prismCenterThree);
+scene.add(prism);
+
+// 镜面位置 = 棱镜反射面中点
+const pd = prism.userData;
+const mirror1Center = pd.v1f.clone().add(pd.v1b).add(pd.v0f).add(pd.v0b).divideScalar(4).add(prismCenterThree);
+const mirror2Center = pd.v2f.clone().add(pd.v2b).add(pd.v0f).add(pd.v0b).divideScalar(4).add(prismCenterThree);
 
 // ==================== 成像光学系统 ====================
 function createImagingSystem() {
   const group = new THREE.Group();
-
   const barrelGeo = new THREE.CylinderGeometry(0.6, 0.6, 2.5, 32);
-  const barrelMat = new THREE.MeshPhongMaterial({ color: 0x333344, shininess: 40, specular: 0x222233 });
-  group.add(new THREE.Mesh(barrelGeo, barrelMat));
+  group.add(new THREE.Mesh(barrelGeo, new THREE.MeshPhongMaterial({ color: 0x333344, shininess: 40, specular: 0x222233 })));
 
   const lensMat = new THREE.MeshPhongMaterial({
     color: 0x88bbff, transparent: true, opacity: 0.35,
     shininess: 150, specular: 0xffffff, side: THREE.DoubleSide,
   });
-
   [0.9, 0.3, -0.3, -0.9].forEach(y => {
-    const discGeo = new THREE.CylinderGeometry(0.54, 0.54, 0.05, 32);
-    const disc = new THREE.Mesh(discGeo, lensMat);
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.54, 0.54, 0.05, 32), lensMat);
     disc.position.y = y;
     group.add(disc);
   });
-
-  const edgeEdges = new THREE.EdgesGeometry(barrelGeo);
-  group.add(new THREE.LineSegments(edgeEdges, new THREE.LineBasicMaterial({ color: 0x555577 })));
-
+  group.add(new THREE.LineSegments(new THREE.EdgesGeometry(barrelGeo), new THREE.LineBasicMaterial({ color: 0x555577 })));
   return group;
 }
+const imagingSystem = createImagingSystem();
+imagingSystem.position.copy(imagingCenterThree);
+scene.add(imagingSystem);
 
 // ==================== CMOS 探测器 ====================
 function createCMOS(name) {
   const group = new THREE.Group();
-
   const bodyGeo = new THREE.BoxGeometry(0.5, 0.1, 0.5);
-  const bodyMat = new THREE.MeshPhongMaterial({ color: 0x1a2a4a, shininess: 30 });
-  group.add(new THREE.Mesh(bodyGeo, bodyMat));
-
-  const surfaceGeo = new THREE.BoxGeometry(0.4, 0.02, 0.4);
-  const surfaceMat = new THREE.MeshPhongMaterial({ color: 0x22aa66, emissive: 0x113322, shininess: 80 });
-  const surface = new THREE.Mesh(surfaceGeo, surfaceMat);
+  group.add(new THREE.Mesh(bodyGeo, new THREE.MeshPhongMaterial({ color: 0x1a2a4a, shininess: 30 })));
+  const surface = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.02, 0.4), new THREE.MeshPhongMaterial({ color: 0x22aa66, emissive: 0x113322, shininess: 80 }));
   surface.position.y = 0.06;
   group.add(surface);
-
-  const edges = new THREE.EdgesGeometry(bodyGeo);
-  group.add(new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x4466aa })));
-
+  group.add(new THREE.LineSegments(new THREE.EdgesGeometry(bodyGeo), new THREE.LineBasicMaterial({ color: 0x4466aa })));
   const label = createLabel(name, '#7ec8e3', 0.6);
   label.position.set(0, -0.4, 0);
   group.add(label);
-
   return group;
 }
+const cmos1 = createCMOS('CMOS1');
+cmos1.position.copy(cmos1Three);
+scene.add(cmos1);
+const cmos2 = createCMOS('CMOS2');
+cmos2.position.copy(cmos2Three);
+scene.add(cmos2);
+
+// ==================== 反射定律计算入射光方向 ====================
+const r1User = new THREE.Vector3(63.63, 42.39, 475).normalize();
+const r2User = new THREE.Vector3(63.63, -42.39, 475).normalize();
+
+function reflectReverse(r, n) {
+  return r.clone().sub(n.clone().multiplyScalar(2 * r.dot(n))).normalize();
+}
+const d1User = reflectReverse(r1User, n1UserVec);
+const d2User = reflectReverse(r2User, n2UserVec);
+
+const d1Three = userToThree(d1User.x, d1User.y, d1User.z).normalize();
+const d2Three = userToThree(d2User.x, d2User.y, d2User.z).normalize();
 
 // ==================== 光路创建 ====================
 const lightPaths = [];
-
 function createLightPath(points, color, dashed) {
   const group = new THREE.Group();
   const curve = new THREE.CatmullRomCurve3(points);
-
   if (dashed) {
     const geo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(64));
     const mat = new THREE.LineDashedMaterial({ color, dashSize: 0.2, gapSize: 0.12 });
@@ -292,260 +359,126 @@ function createLightPath(points, color, dashed) {
     group.userData.dashLine = line;
   } else {
     const tubeGeo = new THREE.TubeGeometry(curve, 64, 0.03, 8, false);
-    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8 });
-    const tubeMesh = new THREE.Mesh(tubeGeo, mat);
-    group.add(tubeMesh);
-    group.userData.tubeMesh = tubeMesh;
+    group.add(new THREE.Mesh(tubeGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8 })));
+    group.userData.tubeMesh = group.children[0];
   }
-
   group.update = function(time) {
-    if (group.userData.dashLine) {
-      group.userData.dashLine.material.dashOffset -= 0.01;
-    }
-    if (group.userData.tubeMesh) {
-      group.userData.tubeMesh.material.opacity = 0.4 + 0.5 * (0.5 + 0.5 * Math.sin(time * 3.0));
-    }
+    if (group.userData.dashLine) group.userData.dashLine.material.dashOffset -= 0.01;
+    if (group.userData.tubeMesh) group.userData.tubeMesh.material.opacity = 0.4 + 0.5 * (0.5 + 0.5 * Math.sin(time * 3.0));
   };
-
   scene.add(group);
   lightPaths.push(group);
   return group;
 }
-
 function createArrow(start, end, color) {
   const dir = new THREE.Vector3().subVectors(end, start);
-  const len = dir.length();
-  dir.normalize();
-  const arrow = new THREE.ArrowHelper(dir, start, len, color, 0.12, 0.06);
-  scene.add(arrow);
-  return arrow;
+  const len = dir.length(); dir.normalize();
+  scene.add(new THREE.ArrowHelper(dir, start, len, color, 0.12, 0.06));
 }
-
-// ==================== 场景几何参数（精确） ====================
-// 1 scene unit = 100mm
-const focalLengthScene = 4.75; // 475mm / 100
-const cmos1OffsetUser = { x: 63.63 / 100, y: 42.39 / 100 }; // user coords
-const cmos2OffsetUser = { x: 63.63 / 100, y: -42.39 / 100 };
-
-// 成像系统中心在 Three.js Y=0, 底部 Y=-1.25
-const imagingCenterThree = new THREE.Vector3(0, 0, 0);
-const imagingBottomThree = new THREE.Vector3(0, -1.25, 0);
-const prismCenterThree = new THREE.Vector3(0, 3.5, 0);
-
-// CMOS位置: 从成像系统中心出发，沿精确角度
-// CMOS1 user: (0.636, 0.424, 4.75) → three: (-0.424, -4.75, 0.636)
-const cmos1Three = userToThree(cmos1OffsetUser.x, cmos1OffsetUser.y, focalLengthScene);
-// CMOS2 user: (0.636, -0.424, 4.75) → three: (0.424, -4.75, 0.636)
-const cmos2Three = userToThree(cmos2OffsetUser.x, cmos2OffsetUser.y, focalLengthScene);
-
-// ==================== 构建光学系统 ====================
-// 棱镜
-const prism = createPrism();
-prism.position.copy(prismCenterThree);
-scene.add(prism);
-
-// 成像系统
-const imagingSystem = createImagingSystem();
-imagingSystem.position.copy(imagingCenterThree);
-scene.add(imagingSystem);
-
-// CMOS 探测器（精确位置）
-const cmos1 = createCMOS('CMOS1');
-cmos1.position.copy(cmos1Three);
-scene.add(cmos1);
-
-const cmos2 = createCMOS('CMOS2');
-cmos2.position.copy(cmos2Three);
-scene.add(cmos2);
-
-// ==================== 反射定律计算入射光方向 ====================
-// 已知: 反射光方向 r = normalize(CMOS位置), 法线 n
-// 公式: d = r - 2(r·n)n (反射是自逆运算，可反推入射方向)
-
-// 反射光方向 (用户坐标)
-const r1User = new THREE.Vector3(63.63, 42.39, 475).normalize();
-const r2User = new THREE.Vector3(63.63, -42.39, 475).normalize();
-
-// 法线 (用户坐标, 已归一化)
-const n1UserVec = new THREE.Vector3(-0.22534469, 0.23344536, -0.945898).normalize();
-const n2UserVec = new THREE.Vector3(-0.22534469, -0.23344536, -0.945898).normalize();
-
-// 入射光方向 d = r - 2(r·n)n
-function reflectReverse(r, n) {
-  const dot = r.dot(n);
-  return r.clone().sub(n.clone().multiplyScalar(2 * dot)).normalize();
-}
-const d1User = reflectReverse(r1User, n1UserVec);
-const d2User = reflectReverse(r2User, n2UserVec);
-
-// 转换到 Three.js 坐标
-const d1Three = userToThree(d1User.x, d1User.y, d1User.z).normalize();
-const d2Three = userToThree(d2User.x, d2User.y, d2User.z).normalize();
-
-// 镜面位置 (棱镜两个斜面的中点)
-const mirror1Three = new THREE.Vector3(-0.75, 3.5, 0); // 左斜面 → CMOS1
-const mirror2Three = new THREE.Vector3(0.75, 3.5, 0);  // 右斜面 → CMOS2
-
-const incidentBeamLen = 4.5;
 
 // ==================== 光路 ====================
+const incidentLen = 4.5;
 
-// 入射光 → CMOS1 镜面（由反射定律计算出的精确方向）
-const inc1Start = mirror1Three.clone().sub(d1Three.clone().multiplyScalar(incidentBeamLen));
-createLightPath([inc1Start, mirror1Three.clone()], 0x44ff44, false);
-createArrow(
-  inc1Start.clone().add(d1Three.clone().multiplyScalar(0.8)),
-  inc1Start.clone().add(d1Three.clone().multiplyScalar(1.8)),
-  0x44ff44
-);
+// 入射光 → CMOS1 镜面
+const inc1Start = mirror1Center.clone().sub(d1Three.clone().multiplyScalar(incidentLen));
+createLightPath([inc1Start, mirror1Center.clone()], 0x44ff44, false);
+createArrow(inc1Start.clone().add(d1Three.clone().multiplyScalar(0.8)),
+           inc1Start.clone().add(d1Three.clone().multiplyScalar(1.8)), 0x44ff44);
 
 // 入射光 → CMOS2 镜面
-const inc2Start = mirror2Three.clone().sub(d2Three.clone().multiplyScalar(incidentBeamLen));
-createLightPath([inc2Start, mirror2Three.clone()], 0x44ff44, false);
-createArrow(
-  inc2Start.clone().add(d2Three.clone().multiplyScalar(0.8)),
-  inc2Start.clone().add(d2Three.clone().multiplyScalar(1.8)),
-  0x44ff44
-);
+const inc2Start = mirror2Center.clone().sub(d2Three.clone().multiplyScalar(incidentLen));
+createLightPath([inc2Start, mirror2Center.clone()], 0x44ff44, false);
+createArrow(inc2Start.clone().add(d2Three.clone().multiplyScalar(0.8)),
+           inc2Start.clone().add(d2Three.clone().multiplyScalar(1.8)), 0x44ff44);
 
-// 反射光 CMOS1镜面 → CMOS1（红色虚线）
-createLightPath([mirror1Three.clone(), cmos1Three.clone()], 0xff4444, true);
+// 反射光 镜面 → CMOS
+createLightPath([mirror1Center.clone(), cmos1Three.clone()], 0xff4444, true);
+createLightPath([mirror2Center.clone(), cmos2Three.clone()], 0xff4444, true);
 
-// 反射光 CMOS2镜面 → CMOS2（红色虚线）
-createLightPath([mirror2Three.clone(), cmos2Three.clone()], 0xff4444, true);
-
-// ==================== 光轴（虚线） ====================
+// ==================== 光轴 ====================
 const opticalAxisGeo = new THREE.BufferGeometry().setFromPoints([
-  new THREE.Vector3(0, 5, 0),
-  new THREE.Vector3(0, -6, 0),
+  new THREE.Vector3(0, 5, 0), new THREE.Vector3(0, -6, 0),
 ]);
-const opticalAxisMat = new THREE.LineDashedMaterial({
+const opticalAxis = new THREE.Line(opticalAxisGeo, new THREE.LineDashedMaterial({
   color: 0x666688, dashSize: 0.3, gapSize: 0.2, transparent: true, opacity: 0.4,
-});
-const opticalAxis = new THREE.Line(opticalAxisGeo, opticalAxisMat);
+}));
 opticalAxis.computeLineDistances();
 scene.add(opticalAxis);
 
-// ==================== 视轴与光轴夹角标注 (9.144°) ====================
+// ==================== 9.144° 夹角弧线 ====================
 function createAngleArc(center, dir1, dir2, radius, color) {
-  const points = [];
-  const segments = 32;
   const a = new THREE.Vector3().subVectors(dir1, center).normalize();
   const b = new THREE.Vector3().subVectors(dir2, center).normalize();
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    const p = new THREE.Vector3().lerpVectors(a, b, t).normalize().multiplyScalar(radius).add(center);
-    points.push(p);
+  const points = [];
+  for (let i = 0; i <= 32; i++) {
+    const t = i / 32;
+    points.push(new THREE.Vector3().lerpVectors(a, b, t).normalize().multiplyScalar(radius).add(center));
   }
-  const geo = new THREE.BufferGeometry().setFromPoints(points);
-  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.7 });
-  const line = new THREE.Line(geo, mat);
-  scene.add(line);
-  return line;
+  scene.add(new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(points),
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.7 })
+  ));
 }
+const arcR = 2.0;
+createAngleArc(imagingCenterThree, imagingCenterThree.clone().add(new THREE.Vector3(0, -1, 0)), cmos1Three, arcR, 0xffcc44);
+createAngleArc(imagingCenterThree, imagingCenterThree.clone().add(new THREE.Vector3(0, -1, 0)), cmos2Three, arcR, 0xffcc44);
 
-// 9.144° 夹角弧线（CMOS1侧）
-const arcRadius = 2.0;
-createAngleArc(
-  imagingCenterThree,
-  imagingBottomThree,
-  cmos1Three,
-  arcRadius,
-  0xffcc44
-);
+const midDir1 = cmos1Three.clone().sub(imagingCenterThree).add(new THREE.Vector3(0, -1, 0)).normalize().multiplyScalar(arcR + 0.5).add(imagingCenterThree);
 const angleLabel1 = createLabel('9.144°', '#ffcc44', 0.5);
-const midDir1 = cmos1Three.clone().sub(imagingCenterThree).add(
-  imagingBottomThree.clone().sub(imagingCenterThree)
-).normalize().multiplyScalar(arcRadius + 0.5).add(imagingCenterThree);
 angleLabel1.position.copy(midDir1);
 scene.add(angleLabel1);
 
-// 9.144° 夹角弧线（CMOS2侧）
-createAngleArc(
-  imagingCenterThree,
-  imagingBottomThree,
-  cmos2Three,
-  arcRadius,
-  0xffcc44
-);
+const midDir2 = cmos2Three.clone().sub(imagingCenterThree).add(new THREE.Vector3(0, -1, 0)).normalize().multiplyScalar(arcR + 0.5).add(imagingCenterThree);
 const angleLabel2 = createLabel('9.144°', '#ffcc44', 0.5);
-const midDir2 = cmos2Three.clone().sub(imagingCenterThree).add(
-  imagingBottomThree.clone().sub(imagingCenterThree)
-).normalize().multiplyScalar(arcRadius + 0.5).add(imagingCenterThree);
 angleLabel2.position.copy(midDir2);
 scene.add(angleLabel2);
 
 // ==================== 焦距箭头 ====================
-const focalArrow = new THREE.ArrowHelper(
-  new THREE.Vector3(0, -1, 0),
-  new THREE.Vector3(-1.5, -1.25, 0),
-  focalLengthScene,
-  0x4488ff, 0.15, 0.08
-);
-scene.add(focalArrow);
+scene.add(new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(-1.5, -1.25, 0), focalLengthScene, 0x4488ff, 0.15, 0.08));
 const fLabel = createLabel('f = 475mm', '#4488ff', 0.6);
 fLabel.position.set(-2.0, -2.5, 0);
 scene.add(fLabel);
 
-// ==================== FOV 视场指示线 (2.17°, 夸大5倍显示) ====================
+// ==================== FOV 视场指示线 ====================
 function createFOVLines(cmosPos) {
-  const group = new THREE.Group();
-  const fovMat = new THREE.LineDashedMaterial({
-    color: 0xaaaaaa, dashSize: 0.15, gapSize: 0.1, transparent: true, opacity: 0.4,
-  });
-
-  // FOV 2.17°, 半角 1.085° — 夸大5倍用于可见性
+  const fovMat = new THREE.LineDashedMaterial({ color: 0xaaaaaa, dashSize: 0.15, gapSize: 0.1, transparent: true, opacity: 0.4 });
   const halfAngle = 1.085 * 5 * Math.PI / 180;
-  const dirToCmos = cmosPos.clone().sub(imagingBottomThree).normalize();
-
-  // 在垂直于dirToCmos的方向上展开FOV
+  const imagingBot = new THREE.Vector3(0, -1.25, 0);
+  const dir = cmosPos.clone().sub(imagingBot).normalize();
   const up = new THREE.Vector3(0, 1, 0);
-  const perp = new THREE.Vector3().crossVectors(dirToCmos, up).normalize();
+  const perp = new THREE.Vector3().crossVectors(dir, up).normalize();
   if (perp.length() < 0.01) perp.set(1, 0, 0);
-  const perp2 = new THREE.Vector3().crossVectors(dirToCmos, perp).normalize();
-
-  const dist = cmosPos.distanceTo(imagingBottomThree);
+  const perp2 = new THREE.Vector3().crossVectors(dir, perp).normalize();
+  const dist = cmosPos.distanceTo(imagingBot);
   const spread = Math.tan(halfAngle) * dist;
-
-  for (const offset of [perp, perp2]) {
-    const end1 = cmosPos.clone().add(offset.clone().multiplyScalar(spread));
-    const end2 = cmosPos.clone().add(offset.clone().multiplyScalar(-spread));
-    for (const end of [end1, end2]) {
-      const pts = [imagingBottomThree.clone(), end];
-      const geo = new THREE.BufferGeometry().setFromPoints(pts);
-      const line = new THREE.Line(geo, fovMat.clone());
+  for (const off of [perp, perp2]) {
+    for (const sign of [1, -1]) {
+      const end = cmosPos.clone().add(off.clone().multiplyScalar(spread * sign));
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([imagingBot.clone(), end]), fovMat.clone());
       line.computeLineDistances();
-      group.add(line);
+      scene.add(line);
     }
   }
-
-  scene.add(group);
 }
 createFOVLines(cmos1Three);
 createFOVLines(cmos2Three);
 
-// FOV 标注
 const fovLabel1 = createLabel('FOV=2.17°', '#aaaaaa', 0.5);
 fovLabel1.position.copy(cmos1Three).add(new THREE.Vector3(-0.8, -0.6, 0));
 scene.add(fovLabel1);
-
 const fovLabel2 = createLabel('FOV=2.17°', '#aaaaaa', 0.5);
 fovLabel2.position.copy(cmos2Three).add(new THREE.Vector3(0.8, -0.6, 0));
 scene.add(fovLabel2);
 
 // ==================== 反射镜法向量 ====================
-const n1Three = userToThree(n1UserVec.x, n1UserVec.y, n1UserVec.z).normalize();
-const n1Arrow = new THREE.ArrowHelper(n1Three, mirror1Three, 1.5, 0xffaa00, 0.15, 0.08);
-scene.add(n1Arrow);
+scene.add(new THREE.ArrowHelper(n1Three, mirror1Center, 1.5, 0xffaa00, 0.15, 0.08));
 const n1Label = createLabel('n\u2081', '#ffaa00', 0.5);
-n1Label.position.copy(mirror1Three).add(n1Three.clone().multiplyScalar(1.8));
+n1Label.position.copy(mirror1Center).add(n1Three.clone().multiplyScalar(1.8));
 scene.add(n1Label);
 
-const n2Three = userToThree(n2UserVec.x, n2UserVec.y, n2UserVec.z).normalize();
-const n2Arrow = new THREE.ArrowHelper(n2Three, mirror2Three, 1.5, 0xff66ff, 0.15, 0.08);
-scene.add(n2Arrow);
+scene.add(new THREE.ArrowHelper(n2Three, mirror2Center, 1.5, 0xff66ff, 0.15, 0.08));
 const n2Label = createLabel('n\u2082', '#ff66ff', 0.5);
-n2Label.position.copy(mirror2Three).add(n2Three.clone().multiplyScalar(1.8));
+n2Label.position.copy(mirror2Center).add(n2Three.clone().multiplyScalar(1.8));
 scene.add(n2Label);
 
 // ==================== 文字标签 ====================
@@ -573,59 +506,38 @@ const opticalAxisLabel = createLabel('光轴', '#666688', 0.5);
 opticalAxisLabel.position.set(0.4, -5.5, 0);
 scene.add(opticalAxisLabel);
 
-// ==================== 视图交互状态 ====================
+// ==================== 视图交互 ====================
 const state = {
   viewDist: camera.position.length(),
   viewRotX: Math.asin(camera.position.y / camera.position.length()),
   viewRotY: Math.atan2(camera.position.x, camera.position.z),
   viewPan: new THREE.Vector3(0, 0, 0),
-
-  isDragging: false,
-  isAlt: false,
-  button: -1,
+  isDragging: false, isAlt: false, button: -1,
   lastMouse: new THREE.Vector2(),
 };
 
 function updateViewTransform() {
-  const d = state.viewDist;
-  const ry = state.viewRotY;
-  const rx = state.viewRotX;
-  camera.position.set(
-    d * Math.sin(ry) * Math.cos(rx),
-    d * Math.sin(rx),
-    d * Math.cos(ry) * Math.cos(rx)
-  );
+  const d = state.viewDist, ry = state.viewRotY, rx = state.viewRotX;
+  camera.position.set(d * Math.sin(ry) * Math.cos(rx), d * Math.sin(rx), d * Math.cos(ry) * Math.cos(rx));
   camera.position.add(state.viewPan);
   camera.lookAt(state.viewPan);
 }
 updateViewTransform();
 
-// ==================== 鼠标事件 ====================
 function getNDC(e) {
-  return new THREE.Vector2(
-    (e.clientX / window.innerWidth) * 2 - 1,
-    -(e.clientY / window.innerHeight) * 2 + 1
-  );
+  return new THREE.Vector2((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
 }
 
 renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
-
 renderer.domElement.addEventListener('mousedown', (e) => {
-  state.isDragging = true;
-  state.isAlt = e.altKey;
-  state.button = e.button;
-  state.lastMouse = getNDC(e);
-  updateModeText();
+  state.isDragging = true; state.isAlt = e.altKey; state.button = e.button;
+  state.lastMouse = getNDC(e); updateModeText();
 });
-
 renderer.domElement.addEventListener('mousemove', (e) => {
   if (!state.isDragging) return;
   const curr = getNDC(e);
-  const dx = curr.x - state.lastMouse.x;
-  const dy = curr.y - state.lastMouse.y;
-  state.isAlt = e.altKey;
-  updateModeText();
-
+  const dx = curr.x - state.lastMouse.x, dy = curr.y - state.lastMouse.y;
+  state.isAlt = e.altKey; updateModeText();
   if (state.isAlt) {
     if (state.button === 0) {
       state.viewRotY += dx * Math.PI;
@@ -633,8 +545,7 @@ renderer.domElement.addEventListener('mousemove', (e) => {
       state.viewRotX = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, state.viewRotX));
     } else if (state.button === 2) {
       const panSpeed = state.viewDist * 0.5;
-      const forward = new THREE.Vector3();
-      camera.getWorldDirection(forward);
+      const forward = new THREE.Vector3(); camera.getWorldDirection(forward);
       const right = new THREE.Vector3().crossVectors(forward, camera.up).normalize();
       const up = new THREE.Vector3().crossVectors(right, forward).normalize();
       state.viewPan.addScaledVector(right, -dx * panSpeed);
@@ -642,27 +553,14 @@ renderer.domElement.addEventListener('mousemove', (e) => {
     }
     updateViewTransform();
   }
-
   state.lastMouse = curr;
 });
-
-renderer.domElement.addEventListener('mouseup', () => {
-  state.isDragging = false;
-  state.button = -1;
-  modeIndicator.textContent = '就绪';
-});
-
-renderer.domElement.addEventListener('mouseleave', () => {
-  state.isDragging = false;
-  state.button = -1;
-  modeIndicator.textContent = '就绪';
-});
-
+renderer.domElement.addEventListener('mouseup', () => { state.isDragging = false; state.button = -1; modeIndicator.textContent = '就绪'; });
+renderer.domElement.addEventListener('mouseleave', () => { state.isDragging = false; state.button = -1; modeIndicator.textContent = '就绪'; });
 renderer.domElement.addEventListener('wheel', (e) => {
   e.preventDefault();
   if (e.altKey) {
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    state.viewDist *= delta;
+    state.viewDist *= e.deltaY > 0 ? 0.9 : 1.1;
     state.viewDist = Math.max(1, Math.min(50, state.viewDist));
     updateViewTransform();
   }
@@ -673,19 +571,15 @@ function updateModeText() {
     if (state.button === 0) modeIndicator.textContent = '视图旋转中...';
     else if (state.button === 2) modeIndicator.textContent = '视图平移中...';
     else modeIndicator.textContent = '视图操控模式 (Alt)';
-  } else {
-    modeIndicator.textContent = '就绪';
-  }
+  } else { modeIndicator.textContent = '就绪'; }
 }
 
-// ==================== 窗口大小调整 ====================
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// ==================== 渲染循环 ====================
 function animate() {
   requestAnimationFrame(animate);
   const t = performance.now() * 0.001;
