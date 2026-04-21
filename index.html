@@ -358,51 +358,61 @@ const cmos2 = createCMOS('CMOS2');
 cmos2.position.copy(cmos2Three);
 scene.add(cmos2);
 
+// ==================== 反射定律计算入射光方向 ====================
+// 已知: 反射光方向 r = normalize(CMOS位置), 法线 n
+// 公式: d = r - 2(r·n)n (反射是自逆运算，可反推入射方向)
+
+// 反射光方向 (用户坐标)
+const r1User = new THREE.Vector3(63.63, 42.39, 475).normalize();
+const r2User = new THREE.Vector3(63.63, -42.39, 475).normalize();
+
+// 法线 (用户坐标, 已归一化)
+const n1UserVec = new THREE.Vector3(-0.22534469, 0.23344536, -0.945898).normalize();
+const n2UserVec = new THREE.Vector3(-0.22534469, -0.23344536, -0.945898).normalize();
+
+// 入射光方向 d = r - 2(r·n)n
+function reflectReverse(r, n) {
+  const dot = r.dot(n);
+  return r.clone().sub(n.clone().multiplyScalar(2 * dot)).normalize();
+}
+const d1User = reflectReverse(r1User, n1UserVec);
+const d2User = reflectReverse(r2User, n2UserVec);
+
+// 转换到 Three.js 坐标
+const d1Three = userToThree(d1User.x, d1User.y, d1User.z).normalize();
+const d2Three = userToThree(d2User.x, d2User.y, d2User.z).normalize();
+
+// 镜面位置 (棱镜两个斜面的中点)
+const mirror1Three = new THREE.Vector3(-0.75, 3.5, 0); // 左斜面 → CMOS1
+const mirror2Three = new THREE.Vector3(0.75, 3.5, 0);  // 右斜面 → CMOS2
+
+const incidentBeamLen = 4.5;
+
 // ==================== 光路 ====================
 
-// 入射光（从用户+Y方向来 = Three.js -X方向）
-createLightPath([
-  new THREE.Vector3(-5, 3.8, 0),
-  new THREE.Vector3(-0.8, 3.5, 0),
-], 0x44ff44, false);
-createArrow(new THREE.Vector3(-3.5, 3.75, 0), new THREE.Vector3(-2.0, 3.6, 0), 0x44ff44);
-
-// 入射光（从用户-Y方向来 = Three.js +X方向）
-createLightPath([
-  new THREE.Vector3(5, 3.8, 0),
-  new THREE.Vector3(0.8, 3.5, 0),
-], 0x44ff44, false);
-createArrow(new THREE.Vector3(3.5, 3.75, 0), new THREE.Vector3(2.0, 3.6, 0), 0x44ff44);
-
-// 反射光（棱镜底部 → 成像系统顶部）
-createLightPath([
-  new THREE.Vector3(0, 2.8, 0),
-  new THREE.Vector3(0, 1.3, 0),
-], 0xff4444, true);
-
-// 成像光 → CMOS1（精确角度）
-createLightPath([
-  imagingBottomThree.clone(),
-  cmos1Three.clone(),
-], 0x44ff44, false);
-const imgDir1 = cmos1Three.clone().sub(imagingBottomThree).normalize();
+// 入射光 → CMOS1 镜面（由反射定律计算出的精确方向）
+const inc1Start = mirror1Three.clone().sub(d1Three.clone().multiplyScalar(incidentBeamLen));
+createLightPath([inc1Start, mirror1Three.clone()], 0x44ff44, false);
 createArrow(
-  imagingBottomThree.clone().add(imgDir1.clone().multiplyScalar(0.8)),
-  imagingBottomThree.clone().add(imgDir1.clone().multiplyScalar(1.8)),
+  inc1Start.clone().add(d1Three.clone().multiplyScalar(0.8)),
+  inc1Start.clone().add(d1Three.clone().multiplyScalar(1.8)),
   0x44ff44
 );
 
-// 成像光 → CMOS2（精确角度）
-createLightPath([
-  imagingBottomThree.clone(),
-  cmos2Three.clone(),
-], 0x44ff44, false);
-const imgDir2 = cmos2Three.clone().sub(imagingBottomThree).normalize();
+// 入射光 → CMOS2 镜面
+const inc2Start = mirror2Three.clone().sub(d2Three.clone().multiplyScalar(incidentBeamLen));
+createLightPath([inc2Start, mirror2Three.clone()], 0x44ff44, false);
 createArrow(
-  imagingBottomThree.clone().add(imgDir2.clone().multiplyScalar(0.8)),
-  imagingBottomThree.clone().add(imgDir2.clone().multiplyScalar(1.8)),
+  inc2Start.clone().add(d2Three.clone().multiplyScalar(0.8)),
+  inc2Start.clone().add(d2Three.clone().multiplyScalar(1.8)),
   0x44ff44
 );
+
+// 反射光 CMOS1镜面 → CMOS1（红色虚线）
+createLightPath([mirror1Three.clone(), cmos1Three.clone()], 0xff4444, true);
+
+// 反射光 CMOS2镜面 → CMOS2（红色虚线）
+createLightPath([mirror2Three.clone(), cmos2Three.clone()], 0xff4444, true);
 
 // ==================== 光轴（虚线） ====================
 const opticalAxisGeo = new THREE.BufferGeometry().setFromPoints([
@@ -524,23 +534,18 @@ fovLabel2.position.copy(cmos2Three).add(new THREE.Vector3(0.8, -0.6, 0));
 scene.add(fovLabel2);
 
 // ==================== 反射镜法向量 ====================
-// 用户坐标法向量 → Three.js: (ux,uy,uz) → (-uy, -uz, ux)
-const n1User = [-0.22534469, 0.23344536, -0.945898];
-const n1Three = new THREE.Vector3(-n1User[1], -n1User[2], n1User[0]).normalize();
-const n1Origin = new THREE.Vector3(-0.4, 3.6, 0);
-const n1Arrow = new THREE.ArrowHelper(n1Three, n1Origin, 1.3, 0xffaa00, 0.15, 0.08);
+const n1Three = userToThree(n1UserVec.x, n1UserVec.y, n1UserVec.z).normalize();
+const n1Arrow = new THREE.ArrowHelper(n1Three, mirror1Three, 1.5, 0xffaa00, 0.15, 0.08);
 scene.add(n1Arrow);
 const n1Label = createLabel('n\u2081', '#ffaa00', 0.5);
-n1Label.position.copy(n1Origin).add(n1Three.clone().multiplyScalar(1.6));
+n1Label.position.copy(mirror1Three).add(n1Three.clone().multiplyScalar(1.8));
 scene.add(n1Label);
 
-const n2User = [-0.22534469, -0.23344536, -0.945898];
-const n2Three = new THREE.Vector3(-n2User[1], -n2User[2], n2User[0]).normalize();
-const n2Origin = new THREE.Vector3(0.4, 3.6, 0);
-const n2Arrow = new THREE.ArrowHelper(n2Three, n2Origin, 1.3, 0xff66ff, 0.15, 0.08);
+const n2Three = userToThree(n2UserVec.x, n2UserVec.y, n2UserVec.z).normalize();
+const n2Arrow = new THREE.ArrowHelper(n2Three, mirror2Three, 1.5, 0xff66ff, 0.15, 0.08);
 scene.add(n2Arrow);
 const n2Label = createLabel('n\u2082', '#ff66ff', 0.5);
-n2Label.position.copy(n2Origin).add(n2Three.clone().multiplyScalar(1.6));
+n2Label.position.copy(mirror2Three).add(n2Three.clone().multiplyScalar(1.8));
 scene.add(n2Label);
 
 // ==================== 文字标签 ====================
@@ -552,16 +557,16 @@ const imagingLabel = createLabel('甚小畸变、长焦距成像光学系统', '
 imagingLabel.position.set(2.5, 0, 0);
 scene.add(imagingLabel);
 
-const incidentLabelL = createLabel('入射光', '#44ff44', 0.6);
-incidentLabelL.position.set(-4.0, 4.2, 0);
+const incidentLabelL = createLabel('入射光d\u2081', '#44ff44', 0.5);
+incidentLabelL.position.copy(inc1Start).add(d1Three.clone().multiplyScalar(1.5));
 scene.add(incidentLabelL);
 
-const incidentLabelR = createLabel('入射光', '#44ff44', 0.6);
-incidentLabelR.position.set(4.0, 4.2, 0);
+const incidentLabelR = createLabel('入射光d\u2082', '#44ff44', 0.5);
+incidentLabelR.position.copy(inc2Start).add(d2Three.clone().multiplyScalar(1.5));
 scene.add(incidentLabelR);
 
 const reflectLabel = createLabel('反射光', '#ff4444', 0.6);
-reflectLabel.position.set(0.8, 2.0, 0);
+reflectLabel.position.set(0.8, 0, 0.5);
 scene.add(reflectLabel);
 
 const opticalAxisLabel = createLabel('光轴', '#666688', 0.5);
