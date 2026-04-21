@@ -42,9 +42,9 @@
   <div>Alt + 右键拖拽 → 平移视图</div>
   <div>Alt + 滚轮 → 缩放视图</div>
   <div class="section" style="margin-top:8px;">
-    <span style="color:#ff4444;">X轴 向前</span> &nbsp;
+    <span style="color:#ff4444;">X轴 向后</span> &nbsp;
     <span style="color:#44ff44;">Y轴 向左</span> &nbsp;
-    <span style="color:#4488ff;">Z轴 向下</span> &nbsp;
+    <span style="color:#4488ff;">Z轴 向上</span> &nbsp;
     <span style="color:#888;">右手系</span>
   </div>
   <div class="section" style="margin-top:4px;">
@@ -81,10 +81,10 @@
 import * as THREE from 'three';
 
 // ==================== 坐标系映射 ====================
-// 用户坐标系: X向前, Y向左, Z向下, 右手系
-// Three.js映射: user(x,y,z) → three(-y, -z, x)
+// 用户坐标系: X向后, Y向左, Z向上, 右手系
+// Three.js映射: user(x,y,z) → three(-y, z, -x)
 function userToThree(ux, uy, uz) {
-  return new THREE.Vector3(-uy, -uz, ux);
+  return new THREE.Vector3(-uy, uz, -ux);
 }
 
 // ==================== 场景初始化 ====================
@@ -118,9 +118,9 @@ scene.add(gridHelper);
 function createAxes(length, lineWidth) {
   const group = new THREE.Group();
   const axesData = [
-    { dir: new THREE.Vector3(0, 0, 1),  color: 0xff4444, label: 'X' },
+    { dir: new THREE.Vector3(0, 0, -1), color: 0xff4444, label: 'X' },
     { dir: new THREE.Vector3(-1, 0, 0), color: 0x44ff44, label: 'Y' },
-    { dir: new THREE.Vector3(0, -1, 0), color: 0x4488ff, label: 'Z' },
+    { dir: new THREE.Vector3(0, 1, 0),  color: 0x4488ff, label: 'Z' },
   ];
 
   for (const { dir, color, label } of axesData) {
@@ -197,8 +197,8 @@ const cmos2OffsetUser = { x: 63.63 / 100, y: -42.39 / 100 };
 const imagingCenterThree = new THREE.Vector3(0, 0, 0);
 const prismCenterThree = new THREE.Vector3(0, 3.5, 0);
 
-const cmos1Three = userToThree(cmos1OffsetUser.x, cmos1OffsetUser.y, focalLengthScene);
-const cmos2Three = userToThree(cmos2OffsetUser.x, cmos2OffsetUser.y, focalLengthScene);
+const cmos1Three = userToThree(cmos1OffsetUser.x, cmos1OffsetUser.y, -focalLengthScene);
+const cmos2Three = userToThree(cmos2OffsetUser.x, cmos2OffsetUser.y, -focalLengthScene);
 
 // 法线 (用户坐标, 已归一化)
 const n1UserVec = new THREE.Vector3(-0.22534469, 0.23344536, -0.945898).normalize();
@@ -333,8 +333,8 @@ cmos2.position.copy(cmos2Three);
 scene.add(cmos2);
 
 // ==================== 反射定律计算入射光方向 ====================
-const r1User = new THREE.Vector3(63.63, 42.39, 475).normalize();
-const r2User = new THREE.Vector3(63.63, -42.39, 475).normalize();
+const r1User = new THREE.Vector3(63.63, 42.39, -475).normalize();
+const r2User = new THREE.Vector3(63.63, -42.39, -475).normalize();
 
 function reflectReverse(r, n) {
   return r.clone().sub(n.clone().multiplyScalar(2 * r.dot(n))).normalize();
